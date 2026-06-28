@@ -274,7 +274,7 @@ gh pr checks <NUMBER> --repo "$REPO"                                          # 
   fi
   ```
 
-  **GitHub:** `gh pr edit <NUMBER> --repo "$REPO" --add-label "Ready for human review" --add-reviewer "$GH_USER"` (create the label first if it does not exist)
+  **GitHub:** `gh pr edit <NUMBER> --repo "$REPO" --add-label "Ready for human review" --add-reviewer "$GH_USER" --add-assignee "$GH_USER"` (create the label first if it does not exist)
 
 ### A7. Finish PR cycle
 
