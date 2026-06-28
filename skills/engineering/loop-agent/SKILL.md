@@ -245,14 +245,29 @@ gh pr checks <NUMBER> --repo "$REPO"                                          # 
     if [ -z "$LIN_READY_HUMAN_ID" ]; then
       echo "WARNING: 'Ready for human review' label not found in Linear for team $LIN_TEAM_ID — skipping Linear label update"
     else
+      # Resolve workflow state IDs for this team
+      LIN_STATES_JSON=$(linear_gql 'query($teamId: String!) {
+        workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name } }
+      }' "$(jq -cn --arg t "$LIN_TEAM_ID" '{teamId: $t}')")
+
+      LIN_IN_REVIEW_STATE_ID=$(echo "$LIN_STATES_JSON" | jq -r \
+        '.data.workflowStates.nodes[] | select(.name | ascii_downcase == "in review") | .id')
+
       # Remove "In Progress by agent", add "Ready for human review"
       LIN_NEW_LABELS=$(echo "$LIN_CURRENT_LABELS" | jq -c \
         --arg rm "$LIN_IN_PROG_BY_AGENT_ID" --arg add "$LIN_READY_HUMAN_ID" \
         '[.[] | select(. != $rm)] + [$add]')
 
-      linear_gql 'mutation($id: String!, $labelIds: [String!]!) {
-        issueUpdate(id: $id, input: { labelIds: $labelIds }) { success }
-      }' "$(jq -cn --arg id "$LIN_ISSUE_ID" --argjson l "$LIN_NEW_LABELS" '{id:$id,labelIds:$l}')"
+      if [ -n "$LIN_IN_REVIEW_STATE_ID" ]; then
+        linear_gql 'mutation($id: String!, $labelIds: [String!]!, $stateId: String!) {
+          issueUpdate(id: $id, input: { labelIds: $labelIds, stateId: $stateId }) { success }
+        }' "$(jq -cn --arg id "$LIN_ISSUE_ID" --argjson l "$LIN_NEW_LABELS" --arg s "$LIN_IN_REVIEW_STATE_ID" '{id:$id,labelIds:$l,stateId:$s}')"
+      else
+        echo "WARNING: 'In review' state not found in Linear for team $LIN_TEAM_ID — updating labels only"
+        linear_gql 'mutation($id: String!, $labelIds: [String!]!) {
+          issueUpdate(id: $id, input: { labelIds: $labelIds }) { success }
+        }' "$(jq -cn --arg id "$LIN_ISSUE_ID" --argjson l "$LIN_NEW_LABELS" '{id:$id,labelIds:$l}')"
+      fi
     fi
   else
     echo "WARNING: Could not find Linear issue for branch $BRANCH — skipping Linear update; continuing with GitHub promotion"
