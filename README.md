@@ -27,16 +27,6 @@ Processes at most one PR and one issue per invocation, then stops.
 
 ## Installation
 
-### Via Claude plugin (recommended)
-
-Install using the Claude Code plugin manager — the `.claude-plugin/plugin.json` registers all skills automatically.
-
-### Via install script
-
-Run the install script from the repo root:
-
 ```bash
-./install.sh
+npx skills@latest add doktor500/skills
 ```
-
-This symlinks each skill directory into `~/.claude/skills/`, making all skills available globally in Claude Code. Re-running the script is safe — skills already pointing to the correct path are skipped.
