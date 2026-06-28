@@ -149,7 +149,16 @@ git push origin "$BRANCH"
 gh pr checks <NUMBER> --repo "$REPO" --watch --fail-fast
 ```
 
-If CI fails, fix in the worktree and push again (retry cap 3). After 3 failures, STOP and report.
+If CI fails, first re-run the failing checks once before touching code:
+
+```bash
+FAILED_RUN_ID=$(gh pr checks <NUMBER> --repo "$REPO" --json name,conclusion,link \
+  --jq '.[] | select(.conclusion == "FAILURE") | .link' | grep -oE '[0-9]+$' | head -1)
+gh run rerun --failed "$FAILED_RUN_ID"
+gh pr checks <NUMBER> --repo "$REPO" --watch --fail-fast
+```
+
+If it passes on retry, proceed. If still failing, fix in the worktree and push again (retry cap 3). After 3 failures, STOP and report.
 
 ### A6. Promotion check
 
@@ -383,7 +392,16 @@ gh pr checks <NUMBER> --watch --fail-fast
 
 - Exit 0 → CI is green, go to B8.
 - Reports `no checks reported on the 'HEAD' ref` → wait ~30s and retry once; if still none, treat as green.
-- Non-zero → inspect failures and fix:
+- Non-zero → re-run the failing checks once before touching code:
+
+  ```bash
+  FAILED_RUN_ID=$(gh pr checks <NUMBER> --json name,conclusion,link \
+    --jq '.[] | select(.conclusion == "FAILURE") | .link' | grep -oE '[0-9]+$' | head -1)
+  gh run rerun --failed "$FAILED_RUN_ID"
+  gh pr checks <NUMBER> --watch --fail-fast
+  ```
+
+  If it passes on retry, treat as green (go to B8). If still failing → inspect and fix:
 
   ```bash
   gh pr checks <NUMBER>
