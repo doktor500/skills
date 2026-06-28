@@ -188,8 +188,8 @@ BRANCH="<issue branchName>"
 DIR="$WORKTREES_DIR/${BRANCH//\//-}"
 # A leftover dir means a prior crashed cycle — stop rather than clobber it.
 [ -e "$DIR" ] && { echo "Worktree $DIR already exists (leftover from a prior cycle) — stopping"; exit 0; }
-git -C "$REPO_PATH" fetch origin main
-git -C "$REPO_PATH" worktree add -b "$BRANCH" "$DIR" origin/main
+git -C "$REPO_PATH" fetch origin main:main
+git -C "$REPO_PATH" worktree add -b "$BRANCH" "$DIR" main
 cd "$DIR"
 ```
 
