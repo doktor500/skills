@@ -40,7 +40,7 @@ linear_gql() {
   local query="$1"
   local vars="{}"
   [ -n "${2-}" ] && vars="$2"
-  curl -sf --retry 2 -X POST https://api.linear.app/graphql \
+  curl -sf --retry 2 --connect-timeout 10 --max-time 30 -X POST https://api.linear.app/graphql \
     -H "Authorization: Bearer $LINEAR_API_KEY" \
     -H "Content-Type: application/json" \
     -d "$(jq -cn --arg q "$query" --argjson v "$vars" '{query:$q,variables:$v}')"
