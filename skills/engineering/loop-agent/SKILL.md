@@ -162,12 +162,37 @@ If it passes on retry, proceed. If still failing, fix in the worktree and push a
 
 ### A6. Promotion check
 
-Promote ONLY if ALL four hold:
+**Before evaluating promotion conditions, re-fetch all review threads and address any that are unresolved** — new comments or bot threads may have appeared since A3/A5. Run the A3 GraphQL query again:
+
+```bash
+gh api graphql -f query='
+query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      reviewThreads(first:100){ totalCount nodes{
+        id isResolved isOutdated path line
+        comments(first:50){ nodes{ databaseId author{login} body } }
+      }}
+    }
+  }
+}' -f owner="<OWNER>" -f name="<NAME>" -F number=<NUMBER>
+```
+
+For every thread with `isResolved == false`: apply the fix, reply, and resolve it exactly as in A3. Then re-run the quality gate and push:
+
+```bash
+pnpm ts:check && pnpm lint:fix
+git add -A && git commit -m "chore: address additional review feedback" || true
+git push origin "$BRANCH"
+gh pr checks <NUMBER> --repo "$REPO" --watch --fail-fast
+```
+
+Only after all threads are resolved (or confirmed already resolved) proceed to the four promotion conditions:
 
 ```bash
 # (a) ≥1 review submitted (human or bot):
 gh pr view <NUMBER> --repo "$REPO" --json reviews --jq '.reviews | length'   # must be ≥ 1
-# (b) all threads resolved: re-run A3 GraphQL query; every node isResolved == true
+# (b) all threads resolved: every node isResolved == true (verified by the re-fetch above)
 # (c) no conflicts:
 gh pr view <NUMBER> --repo "$REPO" --json mergeable --jq '.mergeable'         # == "MERGEABLE"
 # (d) CI green:
@@ -175,7 +200,7 @@ gh pr checks <NUMBER> --repo "$REPO"                                          # 
 ```
 
 - (a) fails → skip promotion this cycle; leave fixes pushed; re-evaluate next cycle once a reviewer has looked.
-- (b) fails (new bot threads appeared after your push in A5) → do NOT promote; end cycle; the PR will be re-selected next cycle.
+- (b) fails after re-fetch and fix attempts → do NOT promote; end cycle; the PR will be re-selected next cycle.
 - All four pass → promote:
 
   **Linear (two-step lookup via API):**
