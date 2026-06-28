@@ -1,7 +1,31 @@
 ---
 name: loop-agent
-description: One combined cycle of the autonomous development loop. (Phase A) Picks the oldest agent-authored PR with unresolved review threads or conflicts, addresses them, and promotes when genuinely clean. (Phase B) Picks the oldest Linear issue labeled "Ready for agent", implements it, opens a GitHub PR, and drives CI green. Processes at most one PR and one issue per invocation, then stops. Run under /loop for a recurring cadence (e.g. /loop 10m /loop-agent).
---- 
+description: Use when running one autonomous development cycle — handles unresolved PR review threads or merge conflicts, then picks up and implements the oldest Linear issue assigned and labeled "Ready for agent".
+metadata:
+  priority: 4
+  docs:
+    - "https://linear.app/docs/graphql"
+    - "https://cli.github.com/manual/"
+  bashPatterns:
+    - '\bloop-agent\b'
+retrieval:
+  aliases:
+    - autonomous loop
+    - pr cleanup
+    - issue implementation
+    - dev loop cycle
+  intents:
+    - run autonomous development cycle
+    - process ready linear issues
+    - address pr review feedback
+    - implement linear issues automatically
+  entities:
+    - Linear
+    - GitHub PR
+    - worktree
+    - CI
+    - loop-agent
+---
 
 # Combined Loop Agent
 
