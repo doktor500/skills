@@ -420,6 +420,8 @@ git worktree remove "$WORKTREES_DIR/${BRANCH//\//-}"
 
 Output a summary: issue identifier, PR URL, final CI status. Do NOT tag `Ready for human review`.
 
+Then **loop back to Phase A** from A1 — select and process the next open PR before stopping.
+
 ---
 
 ## Failure handling
