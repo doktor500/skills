@@ -1,6 +1,6 @@
 ---
 name: loop-agent
-description: Runs one autonomous development cycle: addresses open PR review threads and merge conflicts (Phase A), then implements the oldest Linear issue assigned and labeled "Ready for agent" (Phase B). Use when executing the dev loop, processing PR review feedback, or picking up ready Linear issues via /loop.
+description: Runs one autonomous development cycle — addresses open PR review threads and merge conflicts (Phase A), then implements the oldest Linear issue assigned and labeled "Ready for agent" (Phase B). Use when executing the dev loop, processing PR review feedback, or picking up ready Linear issues via /loop.
 ---
 
 # Combined Loop Agent
