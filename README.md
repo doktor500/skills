@@ -27,4 +27,12 @@ Processes at most one PR and one issue per invocation, then stops.
 
 ## Installation
 
-Copy the skill directory into your project's `.claude/skills/` folder, or configure your Claude Code settings to point to this repository.
+Run the install script from the repo root:
+
+```bash
+./install.sh
+```
+
+This symlinks each skill directory into `~/.claude/skills/`, making all skills available globally in Claude Code. Re-running the script is safe — skills already pointing to the correct path are skipped.
+
+**Manual installation:** Copy the skill directory into your project's `.claude/skills/` folder, or configure your Claude Code settings to point to this repository.
