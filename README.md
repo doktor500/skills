@@ -4,9 +4,9 @@ Custom [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skill
 
 ## Skills
 
-### `loop-agent`
+### `loop-agent` (`skills/engineering/loop-agent`)
 
-One combined cycle of the autonomous development loop. Designed to run on a recurring interval via `/loop`.
+Runs one autonomous development cycle. Designed to run on a recurring interval via `/loop`.
 
 **Phase A — PR Cleanup:** Picks the oldest agent-authored PR with unresolved review threads or merge conflicts, addresses them, and promotes to `Ready for human review` when clean.
 
@@ -27,6 +27,12 @@ Processes at most one PR and one issue per invocation, then stops.
 
 ## Installation
 
+### Via Claude plugin (recommended)
+
+Install using the Claude Code plugin manager — the `.claude-plugin/plugin.json` registers all skills automatically.
+
+### Via install script
+
 Run the install script from the repo root:
 
 ```bash
@@ -34,5 +40,3 @@ Run the install script from the repo root:
 ```
 
 This symlinks each skill directory into `~/.claude/skills/`, making all skills available globally in Claude Code. Re-running the script is safe — skills already pointing to the correct path are skipped.
-
-**Manual installation:** Copy the skill directory into your project's `.claude/skills/` folder, or configure your Claude Code settings to point to this repository.

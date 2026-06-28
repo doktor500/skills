@@ -1,0 +1,6 @@
+{
+  "name": "skills",
+  "skills": [
+    "./skills/engineering/loop-agent"
+  ]
+}

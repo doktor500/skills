@@ -6,7 +6,7 @@ SKILLS_DIR="$HOME/.claude/skills"
 
 mkdir -p "$SKILLS_DIR"
 
-for skill_path in "$REPO_ROOT"/*/; do
+for skill_path in "$REPO_ROOT"/skills/*/*/; do
   skill_name="$(basename "$skill_path")"
   target="$SKILLS_DIR/$skill_name"
 
