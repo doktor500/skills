@@ -26,6 +26,29 @@ GH_USER=$(gh api user --jq '.login')
 
 All subsequent shell commands use `$REPO`, `$REPO_PATH`, `$WORKTREES_DIR`, and `$GH_USER`.
 
+## Linear API helper
+
+All Linear interactions use the GraphQL API directly via `curl` and `jq`. Export `LINEAR_API_KEY` before running this skill.
+
+```bash
+LINEAR_API_KEY="${LINEAR_API_KEY:?LINEAR_API_KEY is required — export it before running}"
+
+# Helper: run a Linear GraphQL query or mutation.
+# Usage: linear_gql '<query>' '<json-variables-object>'
+# Variables default to {} when omitted.
+linear_gql() {
+  local query="$1"
+  local vars="{}"
+  [ -n "${2-}" ] && vars="$2"
+  curl -sf --retry 2 -X POST https://api.linear.app/graphql \
+    -H "Authorization: Bearer $LINEAR_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -cn --arg q "$query" --argjson v "$vars" '{query:$q,variables:$v}')"
+}
+```
+
+`jq` must be available. All `linear_gql` calls below assume this function is defined in the current shell.
+
 ## Configuration
 
 - Base branch: `main`
@@ -145,11 +168,64 @@ gh pr checks <NUMBER> --repo "$REPO"                                          # 
 - (a) fails → skip promotion this cycle; leave fixes pushed; re-evaluate next cycle once a reviewer has looked.
 - (b) fails (new bot threads appeared after your push in A5) → do NOT promote; end cycle; the PR will be re-selected next cycle.
 - All four pass → promote:
-  - **Linear (two-step lookup):**
-    1. Try `list_issues` filtered by `In Progress by agent`, find the one whose `branchName` matches the PR head branch.
-    2. If not found (e.g. the PR was opened by a human, not Phase B), extract the issue identifier from the branch name — the branch typically encodes it as `<team>-<number>` (e.g. `david/fal-136-some-title` → identifier `FAL-136`). Call `get_issue` with that identifier directly.
-    3. Once found by either path: call `update_issue` to add `Ready for human review` to its labels (and remove `In Progress by agent` if present). Never skip the Linear update — if neither lookup succeeds, log the failure and continue with GitHub promotion.
-  - **GitHub:** `gh pr edit <NUMBER> --repo "$REPO" --add-label "Ready for human review"` (create the label first if it does not exist)
+
+  **Linear (two-step lookup via API):**
+
+  ```bash
+  # Step 1: find the issue with "In Progress by agent" label whose branchName matches the PR head branch
+  INPROGRESS_JSON=$(linear_gql 'query {
+    issues(
+      filter: { labels: { name: { eqIgnoreCase: "In Progress by agent" } } }
+      first: 50
+    ) { nodes { id identifier branchName team { id } labels { nodes { id name } } } }
+  }')
+
+  LIN_MATCHED=$(echo "$INPROGRESS_JSON" | jq -c \
+    --arg b "$BRANCH" '.data.issues.nodes[] | select(.branchName == $b)' | head -1)
+
+  # Step 2: if not found, extract identifier from branch name (e.g. david/fal-136-... → FAL-136)
+  if [ -z "$LIN_MATCHED" ]; then
+    LIN_IDENTIFIER=$(echo "$BRANCH" | grep -oiE '[A-Za-z]+-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]')
+    if [ -n "$LIN_IDENTIFIER" ]; then
+      LIN_MATCHED=$(linear_gql 'query($id: String!) {
+        issue(id: $id) { id identifier branchName team { id } labels { nodes { id name } } }
+      }' "$(jq -cn --arg id "$LIN_IDENTIFIER" '{id: $id}')" | jq -c '.data.issue // empty')
+    fi
+  fi
+
+  if [ -n "$LIN_MATCHED" ] && [ "$LIN_MATCHED" != "null" ]; then
+    LIN_ISSUE_ID=$(echo "$LIN_MATCHED" | jq -r '.id')
+    LIN_TEAM_ID=$(echo "$LIN_MATCHED" | jq -r '.team.id')
+    LIN_CURRENT_LABELS=$(echo "$LIN_MATCHED" | jq -c '[.labels.nodes[].id]')
+
+    # Resolve label IDs for this team
+    LIN_LABELS_JSON=$(linear_gql 'query($teamId: String!) {
+      issueLabels(filter: { team: { id: { eq: $teamId } } }) { nodes { id name } }
+    }' "$(jq -cn --arg t "$LIN_TEAM_ID" '{teamId: $t}')")
+
+    LIN_IN_PROG_BY_AGENT_ID=$(echo "$LIN_LABELS_JSON" | jq -r \
+      '.data.issueLabels.nodes[] | select(.name | ascii_downcase == "in progress by agent") | .id')
+    LIN_READY_HUMAN_ID=$(echo "$LIN_LABELS_JSON" | jq -r \
+      '.data.issueLabels.nodes[] | select(.name | ascii_downcase == "ready for human review") | .id')
+
+    if [ -z "$LIN_READY_HUMAN_ID" ]; then
+      echo "WARNING: 'Ready for human review' label not found in Linear for team $LIN_TEAM_ID — skipping Linear label update"
+    else
+      # Remove "In Progress by agent", add "Ready for human review"
+      LIN_NEW_LABELS=$(echo "$LIN_CURRENT_LABELS" | jq -c \
+        --arg rm "$LIN_IN_PROG_BY_AGENT_ID" --arg add "$LIN_READY_HUMAN_ID" \
+        '[.[] | select(. != $rm)] + [$add]')
+
+      linear_gql 'mutation($id: String!, $labelIds: [String!]!) {
+        issueUpdate(id: $id, input: { labelIds: $labelIds }) { success }
+      }' "$(jq -cn --arg id "$LIN_ISSUE_ID" --argjson l "$LIN_NEW_LABELS" '{id:$id,labelIds:$l}')"
+    fi
+  else
+    echo "WARNING: Could not find Linear issue for branch $BRANCH — skipping Linear update; continuing with GitHub promotion"
+  fi
+  ```
+
+  **GitHub:** `gh pr edit <NUMBER> --repo "$REPO" --add-label "Ready for human review"` (create the label first if it does not exist)
 
 ### A7. Finish PR cycle
 
@@ -168,23 +244,86 @@ Report: PR URL, threads addressed, conflicts fixed, promotion result (promoted /
 
 ### B1. Find the oldest ready issue
 
-First, resolve your Linear user ID:
+Resolve your Linear user ID and find the oldest assigned ready issue in one pass:
 
-- Call `get_user` with id `"me"` to get the currently authenticated Linear user; capture its `id` as `LINEAR_USER_ID`.
+```bash
+# Get current user ID
+LINEAR_USER_ID=$(linear_gql 'query { viewer { id } }' | jq -r '.data.viewer.id')
 
-Then call `list_issues` filtered by BOTH the `Ready for agent` label AND `assigneeId: LINEAR_USER_ID`. Sort by creation date ascending and take the SINGLE oldest issue. If there are none assigned to you, output `No issues ready` and STOP.
+# List issues labeled "Ready for agent" assigned to me, oldest first
+B1_JSON=$(linear_gql 'query($assigneeId: ID!) {
+  issues(
+    filter: {
+      labels: { name: { eqIgnoreCase: "Ready for agent" } }
+      assignee: { id: { eq: $assigneeId } }
+      state: { type: { nin: ["completed", "cancelled"] } }
+    }
+    orderBy: createdAt
+    first: 10
+  ) {
+    nodes {
+      id identifier title branchName
+      state { id name }
+      labels { nodes { id name } }
+      team { id }
+    }
+  }
+}' "$(jq -cn --arg a "$LINEAR_USER_ID" '{assigneeId: $a}')")
+
+B1_COUNT=$(echo "$B1_JSON" | jq '.data.issues.nodes | length')
+[ "$B1_COUNT" -eq 0 ] && { echo "No issues ready"; exit 0; }
+
+# Take the oldest (first result)
+ISSUE_ID=$(echo "$B1_JSON"        | jq -r '.data.issues.nodes[0].id')
+ISSUE_IDENTIFIER=$(echo "$B1_JSON" | jq -r '.data.issues.nodes[0].identifier')
+ISSUE_TITLE=$(echo "$B1_JSON"     | jq -r '.data.issues.nodes[0].title')
+BRANCH=$(echo "$B1_JSON"          | jq -r '.data.issues.nodes[0].branchName')
+TEAM_ID=$(echo "$B1_JSON"         | jq -r '.data.issues.nodes[0].team.id')
+CURRENT_LABEL_IDS=$(echo "$B1_JSON" | jq -c '[.data.issues.nodes[0].labels.nodes[].id]')
+```
+
+If there are none assigned to you, output `No issues ready` and STOP.
 
 ### B2. Claim the issue
 
-- Use `list_issue_labels` to resolve the IDs of `Ready for agent` and `In Progress by agent`; use `list_issue_statuses` to resolve the `In Progress` state ID (case-insensitive matching).
-- Call `update_issue` to BOTH set the workflow state to `In Progress` AND swap labels: (current) − `Ready for agent` + `In Progress by agent`.
+Resolve label and state IDs for the team, then update the issue atomically:
+
+```bash
+# Resolve label IDs (case-insensitive) for this team
+B2_LABELS_JSON=$(linear_gql 'query($teamId: String!) {
+  issueLabels(filter: { team: { id: { eq: $teamId } } }) { nodes { id name } }
+}' "$(jq -cn --arg t "$TEAM_ID" '{teamId: $t}')")
+
+READY_FOR_AGENT_ID=$(echo "$B2_LABELS_JSON" | jq -r \
+  '.data.issueLabels.nodes[] | select(.name | ascii_downcase == "ready for agent") | .id')
+IN_PROGRESS_BY_AGENT_ID=$(echo "$B2_LABELS_JSON" | jq -r \
+  '.data.issueLabels.nodes[] | select(.name | ascii_downcase == "in progress by agent") | .id')
+
+# Resolve "In Progress" workflow state ID for this team
+B2_STATES_JSON=$(linear_gql 'query($teamId: String!) {
+  workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name } }
+}' "$(jq -cn --arg t "$TEAM_ID" '{teamId: $t}')")
+
+IN_PROGRESS_STATE_ID=$(echo "$B2_STATES_JSON" | jq -r \
+  '.data.workflowStates.nodes[] | select(.name | ascii_downcase == "in progress") | .id')
+
+# Compute new label set: remove "Ready for agent", add "In Progress by agent"
+NEW_LABEL_IDS=$(echo "$CURRENT_LABEL_IDS" | jq -c \
+  --arg rm "$READY_FOR_AGENT_ID" --arg add "$IN_PROGRESS_BY_AGENT_ID" \
+  '[.[] | select(. != $rm)] + [$add]')
+
+# Update issue: set state to "In Progress" and swap labels
+linear_gql 'mutation($id: String!, $stateId: String!, $labelIds: [String!]!) {
+  issueUpdate(id: $id, input: { stateId: $stateId, labelIds: $labelIds }) { success }
+}' "$(jq -cn --arg id "$ISSUE_ID" --arg s "$IN_PROGRESS_STATE_ID" --argjson l "$NEW_LABEL_IDS" \
+  '{id:$id,stateId:$s,labelIds:$l}')"
+```
 
 ### B3. Create a worktree
 
-Read the issue's `branchName` field (Linear provides this). Then:
+Use `$BRANCH` already captured in B1 (Linear's `branchName` field). Then:
 
 ```bash
-BRANCH="<issue branchName>"
 DIR="$WORKTREES_DIR/${BRANCH//\//-}"
 # A leftover dir means a prior crashed cycle — stop rather than clobber it.
 [ -e "$DIR" ] && { echo "Worktree $DIR already exists (leftover from a prior cycle) — stopping"; exit 0; }
@@ -197,7 +336,7 @@ Do ALL subsequent implementation work with the shell cwd inside `$DIR`. Every gi
 
 ### B4. Implement the issue
 
-Implement the change described in the issue, following repo conventions in  `CLAUDE.md`. Write or update tests as appropriate.
+Implement the change described in the issue, following repo conventions in `CLAUDE.md`. Write or update tests as appropriate.
 
 ### B5. Quality gate (must pass before pushing)
 
@@ -268,4 +407,3 @@ Output a summary: issue identifier, PR URL, final CI status. Do NOT tag `Ready f
 ## Failure handling
 
 On any unrecoverable failure: leave the Linear issue labeled `In Progress by agent`, keep the worktree for debugging, and report exactly what failed and where. Never revert an issue back to `Ready for agent`.
-

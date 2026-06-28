@@ -21,7 +21,8 @@ Processes at most one PR and one issue per invocation, then stops.
 
 **Requirements:**
 - `gh` CLI authenticated
-- Linear MCP server configured
+- `LINEAR_API_KEY` environment variable set (Linear API key)
+- `curl` and `jq` available in the shell
 - `pnpm` with `ts:check` and `lint:fix` scripts in the target repo
 
 ## Installation
